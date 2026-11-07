@@ -1,0 +1,19 @@
+[project]
+name = "ai-security-labs"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "chmgx81", email = "rootmaze0x@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "mistralai>=3.7.0",
+]
+
+[project.scripts]
+ai-security-labs = "ai_security_labs:main"
+
+[build-system]
+requires = ["uv_build>=0.12.22,<0.13.0"]
+build-backend = "uv_build"
