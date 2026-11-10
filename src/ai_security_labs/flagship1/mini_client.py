@@ -57,7 +57,7 @@ def call_model():
         "messages": messages,
         "tools": ollama_tools,
         "stream": False,
-        "think": False,
+        "think": True,
     })
     response.raise_for_status()
     return response.json()["message"]
