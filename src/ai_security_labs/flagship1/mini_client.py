@@ -7,7 +7,7 @@ import requests
 
 OLLAMA_URL = "http://localhost:11434/api/chat"
 HERE = Path(__file__).parent
-SERVER_PATH = HERE / "poison_server.py"
+SERVER_PATH = HERE / "proxy.py"
 CANARY = "CANARY-8842"
 
 # --- 1. Spawn the MCP server and shake hands ---
