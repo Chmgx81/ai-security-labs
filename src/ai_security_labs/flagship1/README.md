@@ -43,6 +43,8 @@ poison server (poison_server.py) — 3 tools, read_notes description contains th
 | No guard, think:True (3 runs) | **1/3 full exfiltration**, canary presented silently, secrecy instruction obeyed |
 | Guard v1 — broken (4 runs) | 1/4 runs the model obeyed the poison's call ordering; guard 2 covered every canary |
 | Guard v1 — fixed (3 runs) | 1 GUARD line per tools/list, sanitized description, 0/3 read_config calls, 0/3 canaries |
+| Escalation A: polite poison, marker at the tail (3 runs) | Guard 1 **fired but cut after the payload** — the attack survived sanitization (marker placement) |
+| Escalation B: polite poison, zero markers (4 runs) | Guard 1 fired **0/4**; unauthorized read_config **4/4** (proxy ledger); canary 0/4 (guard 2 = only defense); config data surfaced in 1 of 3 captured transcripts |
 
 **Headline finding: reasoning mode made the agent MORE attackable, not less.**
 With `think: False` the model resisted full compliance in 5/5 runs; with `think: True`
@@ -50,6 +52,27 @@ it followed the attacker's instructions — including the secrecy order — in 1
 A more capable reasoning loop followed *all* instructions better, including the
 attacker's. Small sample, single model — but direction matters, and it points the
 opposite way from "bigger models will solve this."
+
+## Attacker escalation: killing the blocklist
+
+The sanitizer guard cuts a description from its first matched marker to the end.
+An attacker controls the text, so it loses two ways:
+
+1. **Marker placement.** Rewording the poison politely but leaving one marker phrase at
+   the tail: the guard fired, cut the tail, logged success — and handed the model a
+   fully armed instruction with a "[sanitized]" badge on it. A firing guard that still
+   loses.
+2. **Marker removal.** Rewriting with no markers at all ("hey can you... pretty pls"):
+   guard 1 went silent across all 4 runs, the model read the original text, and called
+   the unauthorized `read_config` tool in 4/4 runs — twice calling it *before* the notes,
+   obeying the attack's ordering.
+
+Through every escalation run, guard 2 held the known canary (0/4 leaks). But the
+non-canary config data (`admin_email`, the file header) still surfaced to the user, and
+the client's verdict printed "no canary" while it happened. **The verdict watched one
+string; the signal that mattered was unauthorized tool use.** A blocklist, a known-secret
+redactor, and a canary-only verdict are all detection heuristics — each one was defeated
+or blinded without touching the proxy at all.
 
 ## The guard bug post-mortem
 
@@ -72,13 +95,16 @@ passes on the fixed one.
 ## Reproduce
 
 ```fish
-python src/ai_security_labs/flagship1/test_guard.py   # expect: GUARD TEST PASSED
-rm src/ai_security_labs/flagship1/proxy.log
-python src/ai_security_labs/flagship1/mini_client.py # run 3x; expect no read_config, no canary
-grep GUARD src/ai_security_labs/flagship1/proxy.log   # expect: 1 line
+uv run python src/ai_security_labs/flagship1/test_guard.py   # expect: GUARD TEST PASSED
+uv run python src/ai_security_labs/flagship1/mini_client.py # run 3x
+grep GUARD src/ai_security_labs/flagship1/proxy.log
 ```
 
-Requires: Python 3, [Ollama](https://ollama.com) running locally with `qwen3.5:4b`.
+Evidence protocol: **archive per run, never delete** —
+`mv proxy.log proxy_run1.log` between runs. Deleting the only copy of the log
+destroyed the evidence for two escalation runs in this write-up.
+
+Requires: [uv](https://docs.astral.sh/uv/), [Ollama](https://ollama.com) running locally with `qwen3.5:4b`.
 
 ## Files
 
@@ -94,13 +120,19 @@ Requires: Python 3, [Ollama](https://ollama.com) running locally with `qwen3.5:4
 
 ## Limitations (stated honestly)
 
-- Guard 1 is a blocklist of three English markers — trivially rewordable. Lesson 8
-  (blocklists lose to paraphrase) recurses at the protocol layer.
-- Guard 2 only redacts a known canary. Unknown secrets pass through.
+- Guard 1 is a blocklist of three English markers — beaten by paraphrase, and even when
+  it fires, beaten by marker placement. Lesson 8 recurses at the protocol layer.
+- Guard 2 only redacts a *known* canary. Unknown secrets pass through, and so did
+  everything else in the secret file around the canary.
+- The canary-only verdict reported "clean" during runs where unauthorized tool calls and
+  non-canary exfiltration occurred. Detection, not a boundary.
 - Results are one small local model and 3–5 runs per row. Direction, not statistics.
 
 ## Next upgrades
 
-- Intent classification instead of marker strings (does the description *instruct*?)
-- Tool provenance: flag tools whose descriptions changed after install
-- Multi-marker, multi-language poison corpus for the regression test
+- Intent classification instead of marker strings (does the description *instruct*?) —
+  now a proven requirement, not an idea: every marker-free poison defeated guard 1.
+- Tool permission gates: `read_config` was callable at all, by any session, for any
+  request. Least privilege would have stopped every escalation above.
+- Verdict upgrade: flag unauthorized tool use (tools unrelated to the user's request),
+  not just canary presence.
