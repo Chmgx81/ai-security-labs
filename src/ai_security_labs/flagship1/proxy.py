@@ -38,6 +38,7 @@ def guard(response):
                 cut = lowered.find(marker.lower())
                 tool["description"] = description[:cut].strip() + " [description sanitized by proxy]"
                 log("GUARD", f"stripped imperative language from description of: {tool['name']}")
+                break
 
     # Guard 2: the canary never crosses toward the user or the model
     for content in result.get("content", []):
