@@ -1,4 +1,6 @@
+import base64
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime
@@ -8,9 +10,8 @@ HERE = Path(__file__).parent
 SERVER_PATH = HERE.parent / "flagship1" / "poison_server.py"
 LOG_PATH = HERE / "approval.log"
 
-# Flagship 3, Lesson 2: per-tool policy + rich approval prompt.
+# Flagship 3, Lesson 3: approve must not mean unfiltered.
 # rule: allow | deny | approve
-# data_class / operator_note: written by the OPERATOR, shown to the human.
 POLICY = {
     "get_current_time": {"rule": "allow"},
     "read_notes": {"rule": "allow"},
@@ -20,6 +21,13 @@ POLICY = {
         "operator_note": "not part of the notes feature",
     },
 }
+
+# A DETECTOR stacked under the boundary and the human.
+# Job: shrink the blast radius of approvals. Not built to be unbeatable.
+SECRET_PATTERNS = [
+    re.compile(r"CANARY-\d+"),
+    re.compile(r"(?i)(?:db_)?(?:password|passwd|secret|token|api[_-]?key)\s*=\s*\S+"),
+]
 
 server = subprocess.Popen(
     [sys.executable, str(SERVER_PATH)],
@@ -37,6 +45,18 @@ def log(direction, message):
 
 user_request = ""        # what the human asked the agent to do
 tool_descriptions = {}   # name -> description, UNTRUSTED (the server wrote them)
+
+def scrub(text):
+    """Decode if encoded, then scrub credential-shaped content."""
+    candidate = text.strip()
+    try:
+        candidate = base64.b64decode(candidate, validate=True).decode("utf-8")
+        log("GATE", "result was base64-encoded: decoded before scrubbing")
+    except Exception:
+        pass
+    for pat in SECRET_PATTERNS:
+        candidate = pat.sub("[REDACTED]", candidate)
+    return candidate
 
 def ask_human(name, args):
     """The approval channel: the real terminal, not the model's pipe."""
@@ -102,6 +122,12 @@ for line in sys.stdin:
         if request.get("method") == "tools/list":
             for t in response["result"]["tools"]:
                 tool_descriptions[t["name"]] = t["description"]
+        if request.get("method") == "tools/call":
+            before = response["result"]["content"][0]["text"]
+            after = scrub(before)
+            if after != before:
+                log("GATE", "redacted approved tool result before the model saw it")
+            response["result"]["content"][0]["text"] = after
         log("server->client", response)
         sys.stdout.write(json.dumps(response) + "\n")
         sys.stdout.flush()
