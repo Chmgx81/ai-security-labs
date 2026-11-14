@@ -24,7 +24,7 @@ def send(obj):
 def receive():
     return json.loads(server.stdout.readline())
 
-send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "approval-client", "version": "0.1"}}})
+send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "approval-client", "version": "0.2", "context": "Read my notes."}}})
 print("connected to:", receive()["result"]["serverInfo"]["name"])
 send({"jsonrpc": "2.0", "method": "notifications/initialized"})
 send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})

@@ -8,14 +8,17 @@ HERE = Path(__file__).parent
 SERVER_PATH = HERE.parent / "flagship1" / "poison_server.py"
 LOG_PATH = HERE / "approval.log"
 
-# Flagship 3: per-tool policy with human approval.
-# allow   -> forward without asking
-# deny    -> refuse, bare error to the model
-# approve -> pause, ask the human, forward only on a yes
+# Flagship 3, Lesson 2: per-tool policy + rich approval prompt.
+# rule: allow | deny | approve
+# data_class / operator_note: written by the OPERATOR, shown to the human.
 POLICY = {
-    "get_current_time": "allow",
-    "read_notes": "allow",
-    "read_config": "approve",
+    "get_current_time": {"rule": "allow"},
+    "read_notes": {"rule": "allow"},
+    "read_config": {
+        "rule": "approve",
+        "data_class": "internal server configuration, contains credentials",
+        "operator_note": "not part of the notes feature",
+    },
 }
 
 server = subprocess.Popen(
@@ -32,10 +35,24 @@ def write_log(entry):
 def log(direction, message):
     write_log({"time": str(datetime.now()), "direction": direction, "message": message})
 
+user_request = ""        # what the human asked the agent to do
+tool_descriptions = {}   # name -> description, UNTRUSTED (the server wrote them)
+
 def ask_human(name, args):
     """The approval channel: the real terminal, not the model's pipe."""
+    lines = [
+        "",
+        "[APPROVAL] -----------------------------",
+        f"[APPROVAL] you asked:        {user_request!r}",
+        f"[APPROVAL] the agent calls: {name}({args})",
+        f"[APPROVAL] operator label:  {POLICY[name].get('data_class', 'unknown')}",
+        f"[APPROVAL] operator note:   {POLICY[name].get('operator_note', '')}",
+        "[APPROVAL] tool says (UNTRUSTED, written by the server):",
+        f"[APPROVAL]   {tool_descriptions.get(name, '(no description)')[:100]}",
+        "[APPROVAL] approve? [y/N] ",
+    ]
     with open("/dev/tty", "w") as out:
-        out.write(f"\n[APPROVAL] the agent requests: {name}({args})\n[APPROVAL] approve? [y/N] ")
+        out.write("\n".join(lines))
         out.flush()
     with open("/dev/tty") as inp:
         answer = inp.readline().strip().lower()
@@ -45,10 +62,15 @@ def ask_human(name, args):
 
 def decide(request):
     """Returns None to forward, or a refusal result to block."""
-    if request.get("method") != "tools/call":
+    method = request.get("method")
+    if method == "initialize":
+        global user_request
+        user_request = (request["params"].get("clientInfo", {}) or {}).get("context", "")
+        return None
+    if method != "tools/call":
         return None
     name = request["params"]["name"]
-    rule = POLICY.get(name, "deny")
+    rule = POLICY.get(name, {}).get("rule", "deny")
     if rule == "allow":
         return None
     if rule == "approve" and ask_human(name, request["params"].get("arguments", {})):
@@ -77,6 +99,9 @@ for line in sys.stdin:
     server.stdin.flush()
     if request.get("id") is not None:
         response = json.loads(server.stdout.readline())
+        if request.get("method") == "tools/list":
+            for t in response["result"]["tools"]:
+                tool_descriptions[t["name"]] = t["description"]
         log("server->client", response)
         sys.stdout.write(json.dumps(response) + "\n")
         sys.stdout.flush()
