@@ -59,7 +59,7 @@ def scrub(text):
     return candidate
 
 def ask_human(name, args):
-    """The approval channel: the real terminal, not the model's pipe."""
+    """The approval channel: the real terminal. No human -> fail closed."""
     lines = [
         "",
         "[APPROVAL] -----------------------------",
@@ -71,6 +71,19 @@ def ask_human(name, args):
         f"[APPROVAL]   {tool_descriptions.get(name, '(no description)')[:100]}",
         "[APPROVAL] approve? [y/N] ",
     ]
+    try:
+        with open("/dev/tty", "w") as out:
+            out.write("\n".join(lines))
+            out.flush()
+        with open("/dev/tty") as inp:
+            answer = inp.readline().strip().lower()
+    except OSError:
+        log("GATE", f"no human available for {name}: failing closed")
+        return False
+    approved = answer == "y"
+    log("HUMAN", f"approval for {name}: {'granted' if approved else 'refused'}")
+    return approved
+    
     with open("/dev/tty", "w") as out:
         out.write("\n".join(lines))
         out.flush()
